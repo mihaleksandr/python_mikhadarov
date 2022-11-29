@@ -1,9 +1,11 @@
 import pygame
 import Generation
 import Labirinth
-
+import socket
+import http.client
 
 def Interface():
+    pygame.init()
     FONT = pygame.font.Font(None, 40)
     small_font = pygame.font.Font(None, 20)
     dis = pygame.display.set_mode((500, 500))
@@ -17,12 +19,18 @@ def Interface():
     file = False
     start_render = False
     first = True
-    global game_over
+    game_over = False
+    clock = pygame.time.Clock()
+    main_socket.listen(2)
+    players_socket = []
+    score = 0
+    score_curr = 5000
     while not game_over:
         keys = []
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 game_over = True
+                main_socket.close()
             if event.type == pygame.KEYDOWN and not start_render:
                 if event.key == pygame.K_LEFT:
                     mode = "DFS"
@@ -86,8 +94,13 @@ def Interface():
                     Generation.MinSpanningTree(maze)
                 if mode == "Kraskal":
                     Generation.Kraskal(maze)
+                if players_socket:
+                    str_maze = ''
+                    for row in maze.board:
+                        str_maze += ''.join([elem for elem in row])
+                    players_socket[0].send(str_maze.encode())
                 first = False
-            current_cell = Render(maze, dis, current_cell, rect_side, keys)
+            current_cell = Render(maze, dis, current_cell, rect_side, keys, players_socket, score)
 
         else:
             for box in input_boxes:
@@ -105,16 +118,37 @@ def Interface():
             dis.blit(text_21, (100, 280))
             text_22 = small_font.render('Ширина', True, (255, 255, 255))
             dis.blit(text_22, (100, 380))
-            dis.blit(text_r, (200, 200))
+            dis.blit(text_r, (30, 150))
+            text_3 = small_font.render("Подключенные игроки", True, (255, 255, 255))
+            dis.blit(text_3, (280, 180))
+            text_3 = small_font.render("локальныый IP и номер порта", True, (255, 255, 255))
+            dis.blit(text_3, (40, 180))
+            text_3 = small_font.render(str(socket.gethostbyname(socket.gethostname())), True, (255, 255, 255))
+            dis.blit(text_3, (40, 220))
+            text_3 = small_font.render(str(25000), True, (255, 255, 255))
+            dis.blit(text_3, (150, 220))
+            if players_socket:
+                text_4 = small_font.render(str(players_socket[0].getsockname()), True, (255, 255, 255))
+                dis.blit(text_4, (280, 220))
+            try:
+                new_socket, addr = main_socket.accept()
+                print("Подлючение")
+                new_socket.setblocking(False)
+                players_socket.append(new_socket)
+            except:
+                pass
         pygame.display.update()
+        score_curr -= 5
         clock.tick(30)
     pygame.quit()
     quit()
 
 
-def Render(maze, dis, current_cell, rect_side, keys):
+def Render(maze, dis, current_cell, rect_side, keys, players_socket, score):
+    vict = False
     small_font = pygame.font.Font(None, 20)
     big_font = pygame.font.Font(None, 80)
+    global defeat
     global game_over
     if pygame.K_LEFT in keys:
         next_cell = maze.Check(current_cell.x - 1, current_cell.y)
@@ -157,11 +191,35 @@ def Render(maze, dis, current_cell, rect_side, keys):
     if current_cell.x == maze.cols - 1 and current_cell.y == maze.rows - 1:
         dis.fill((0, 0, 0))
         text = big_font.render("Поздравляем!", True, (255, 255, 255))
+        defeat = True
         dis.blit(text, (200, 400))
+
     text = small_font.render("используйте стрелочки для движения", True, (255, 255, 255))
     dis.blit(text, (10, rect_side * (2 * maze.rows + 1)))
-    text = small_font.render("нажмите пробел чтобы показать путь", True, (255, 255, 255))
-    dis.blit(text, (500, rect_side * (2 * maze.rows + 1)))
+    if players_socket:
+        text = small_font.render("Текущий счет:", True, (255, 255, 255))
+        dis.blit(text, (500, rect_side * (2 * maze.rows + 1)))
+        text = small_font.render(str(score), True, (255, 255, 255))
+        dis.blit(text, (700, rect_side * (2 * maze.rows + 1)))
+        try:
+            mes = players_socket[0].recv(1024).decode()
+            if mes == 'Victory':
+                vict = True
+        except:
+            pass
+        if vict:
+            dis.fill((0, 0, 0))
+            text = big_font.render("Победа соперника", True, (255, 255, 255))
+            dis.blit(text, (200, 400))
+            pygame.display.update()
+            return current_cell
+    else:
+        text = small_font.render("нажмите пробел чтобы показать путь", True, (255, 255, 255))
+        dis.blit(text, (500, rect_side * (2 * maze.rows + 1)))
+    if defeat:
+        players_socket[0].send('Victory'.encode())
+    else:
+        players_socket[0].send('0'.encode())
     return current_cell
 
 
@@ -200,8 +258,12 @@ class InputBox:
         self.dis.blit(self.txt_surface, (self.rect.x + 10, self.rect.y + 10))
         pygame.draw.rect(self.dis, self.color, self.rect, 1)
 
-
-clock = pygame.time.Clock()
-pygame.init()
-game_over = False
+defeat = False
+#conn = http.client.HTTPConnection("ifconfig.me")
+#http.client.HTTPConnection("ifconfig.me").request("GET", "/ip")
+#conn.getresponse().read()
+main_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+main_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+main_socket.bind((socket.gethostbyname(socket.gethostname()), 25000))
+main_socket.setblocking(False)
 Interface()
